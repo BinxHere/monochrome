@@ -1334,6 +1334,11 @@ export class Player {
 
                 streamUrl = resolvedStreamInfo.url;
 
+                if (resolvedStreamInfo.source === 'YOUTUBE') {
+                    track.audioQuality = 'YOUTUBE';
+                    this.updateQualityBadges(track);
+                }
+
                 if (resolvedStreamInfo.rgInfo) {
                     this.currentRgValues = resolvedStreamInfo.rgInfo;
                 } else if (resolvedStreamInfo.rgInfoFallback) {
@@ -2148,6 +2153,22 @@ export class Player {
             .catch(() => {});
     }
 
+    updateQualityBadges(track) {
+        const qualityBadge = createQualityBadgeHTML(track);
+        const trackTitle = getTrackTitle(track);
+
+        // Update Now Playing Bar
+        const titleEl = document.querySelector('.now-playing-bar .title');
+        if (titleEl && this.currentTrack?.id === track.id) {
+            titleEl.innerHTML = `${escapeHtml(trackTitle)} ${qualityBadge}`;
+        }
+
+        // Update Fullscreen UI if it's visible
+        if (UIRenderer.instance) {
+            UIRenderer.instance.updateFullscreenQualityBadgePlacement(track);
+        }
+    }
+
     updatePlayingTrackIndicator() {
         const currentTrack = this.getCurrentQueue()[this.currentQueueIndex];
         document.querySelectorAll('.track-item').forEach((item) => {
@@ -2169,10 +2190,11 @@ export class Player {
 
             let badgeEl = titleEl.querySelector('.shaka-quality-badge');
 
-            // Determine if the track is inherently an Atmos track based on metadata
+            // Determine if the track is inherently an Atmos or YouTube track based on metadata
             const trackBaseQuality = deriveTrackQuality(this.currentTrack);
             const isTrackAtmos =
                 trackBaseQuality === 'DOLBY_ATMOS' || this.currentTrack?.audioQuality === 'DOLBY_ATMOS';
+            const isYouTube = trackBaseQuality === 'YOUTUBE' || this.currentTrack?.audioQuality === 'YOUTUBE';
 
             if (this.shakaInitialized) {
                 const variants = this.shakaPlayer.getVariantTracks();
@@ -2180,7 +2202,9 @@ export class Player {
                 if (activeVariant) {
                     if (!badgeEl) {
                         badgeEl = document.createElement('span');
-                        badgeEl.className = 'quality-badge quality-hires shaka-quality-badge';
+                        badgeEl.className = isYouTube
+                            ? 'quality-badge quality-youtube shaka-quality-badge'
+                            : 'quality-badge quality-hires shaka-quality-badge';
                         badgeEl.title = 'Adaptive Stream Quality';
                         titleEl.appendChild(badgeEl);
                         const staticBadge = titleEl.querySelector('.quality-badge:not(.shaka-quality-badge)');
@@ -2190,7 +2214,10 @@ export class Player {
                     let text = '';
                     let isAtmosPlaying = false;
 
-                    if (activeVariant.videoBandwidth && activeVariant.height) {
+                    if (isYouTube) {
+                        text = 'YT';
+                        badgeEl.className = 'quality-badge quality-youtube shaka-quality-badge';
+                    } else if (activeVariant.videoBandwidth && activeVariant.height) {
                         text = `${activeVariant.height}p`;
                     } else if (activeVariant.audioCodec) {
                         const codec = activeVariant.audioCodec.toLowerCase();
@@ -2247,13 +2274,17 @@ export class Player {
                         badgeEl.className = 'quality-badge quality-atmos shaka-quality-badge';
                         badgeEl.innerHTML =
                             SVG_ATMOS(20) + (binauralActive ? ' <span class="binaural-badge">Binaural</span>' : '');
+                    } else if (isYouTube) {
+                        void audioContextManager.notifyBinauralChannelCount(2);
+                        badgeEl.className = 'quality-badge quality-youtube shaka-quality-badge';
+                        badgeEl.textContent = 'YT';
                     } else {
                         // Notify binaural DSP that we're in stereo mode
                         void audioContextManager.notifyBinauralChannelCount(2);
                         badgeEl.className = 'quality-badge quality-hires shaka-quality-badge';
                         badgeEl.textContent = text;
                     }
-                    badgeEl.style.display = text || isAtmosPlaying ? 'inline-flex' : 'none';
+                    badgeEl.style.display = text || isAtmosPlaying || isYouTube ? 'inline-flex' : 'none';
                 }
             } else if (
                 (isIos || isSafari) &&
@@ -2271,6 +2302,10 @@ export class Player {
                 }
 
                 let text = '';
+                if (isYouTube) {
+                    text = 'YT';
+                    badgeEl.className = 'quality-badge quality-youtube shaka-quality-badge';
+                }
 
                 // Ensure device can actually decode Atmos before rendering logo for HLS
                 let deviceSupportsAtmos = false;
@@ -2305,6 +2340,9 @@ export class Player {
                 if (isAtmosPlaying) {
                     badgeEl.innerHTML = SVG_ATMOS(20);
                     badgeEl.className = 'quality-badge quality-atmos shaka-quality-badge';
+                } else if (isYouTube) {
+                    badgeEl.textContent = 'YT';
+                    badgeEl.className = 'quality-badge quality-youtube shaka-quality-badge';
                 } else {
                     badgeEl.textContent = text;
                     badgeEl.className = 'quality-badge quality-hires shaka-quality-badge';

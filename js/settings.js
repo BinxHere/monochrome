@@ -41,6 +41,7 @@ import {
     fullscreenCoverVanillaTiltSettings,
     fullscreenCoverTiltDistanceSettings,
     fullscreenCoverTiltSpeedSettings,
+    apiCacheSettings,
     devModeSettings,
     serverDisruptionSettings,
 } from './storage.js';
@@ -6545,6 +6546,14 @@ export async function initializeSettings(scrobbler, player, api, ui) {
             }, 1500);
         }
     });
+
+    const cacheSizeSelect = document.getElementById('settings-cache-size');
+    if (cacheSizeSelect) {
+        cacheSizeSelect.value = apiCacheSettings.getMaxSize().toString();
+        cacheSizeSelect.addEventListener('change', (e) => {
+            apiCacheSettings.setMaxSize(parseInt(e.target.value));
+        });
+    }
 
     document.getElementById('auth-clear-cloud-btn')?.addEventListener('click', async () => {
         if (confirm('Are you sure you want to delete ALL your data from the cloud? This cannot be undone.')) {

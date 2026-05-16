@@ -5,7 +5,7 @@ import { SVG_RIGHT_ARROW } from './icons';
 export const apiSettings = {
     STORAGE_KEY: 'monochrome-api-instances-v9',
     INSTANCES_URLS: ['https://tidal-uptime.geeked.wtf'],
-    defaultInstances: { api: [], streaming: [], qobuz: [] },
+    defaultInstances: { api: [], streaming: [], qobuz: [], youtube: [] },
     userInstances: null,
     instancesLoaded: false,
     _loadPromise: null,
@@ -14,11 +14,12 @@ export const apiSettings = {
         if (this.userInstances) return this.userInstances;
         try {
             const stored = localStorage.getItem('monochrome-user-api-instances-v1');
-            const parsed = stored ? JSON.parse(stored) : { api: [], streaming: [], qobuz: [] };
+            const parsed = stored ? JSON.parse(stored) : { api: [], streaming: [], qobuz: [], youtube: [] };
             if (!parsed.qobuz) parsed.qobuz = [];
+            if (!parsed.youtube) parsed.youtube = [];
             this.userInstances = parsed;
         } catch {
-            this.userInstances = { api: [], streaming: [], qobuz: [] };
+            this.userInstances = { api: [], streaming: [], qobuz: [], youtube: [] };
         }
         return this.userInstances;
     },
@@ -100,13 +101,14 @@ export const apiSettings = {
                         { url: 'https://qdl-api.monochrome.tf', version: '1.0' },
                         { url: 'https://qobuz.kennyy.com.br', version: '1.0' },
                     ],
+                    youtube: [{ url: 'http://localhost:3006', version: '1.0' }],
                 };
                 this.instancesLoaded = true;
                 this._loadPromise = null;
                 return this.defaultInstances;
             }
 
-            let groupedInstances = { api: [], streaming: [], qobuz: [] };
+            let groupedInstances = { api: [], streaming: [], qobuz: [], youtube: [] };
 
             const isBlockedInstance = (item) => {
                 const url = typeof item === 'string' ? item : item.url;
@@ -130,6 +132,14 @@ export const apiSettings = {
             // Ensure default Qobuz instance is always available
             if (groupedInstances.qobuz.length === 0) {
                 groupedInstances.qobuz = [{ url: 'https://qdl-api.monochrome.tf', version: '1.0' }];
+            }
+
+            if (data.youtube && Array.isArray(data.youtube)) {
+                groupedInstances.youtube = data.youtube;
+            }
+
+            if (groupedInstances.youtube.length === 0) {
+                groupedInstances.youtube = [{ url: 'http://localhost:3006', version: '1.0' }];
             }
 
             this.defaultInstances = groupedInstances;
@@ -240,6 +250,10 @@ export const apiSettings = {
             instances.qobuz = shuffle([...instances.qobuz]);
         }
 
+        if (instances.youtube && instances.youtube.length) {
+            instances.youtube = shuffle([...instances.youtube]);
+        }
+
         this.saveInstances(instances);
 
         // Return API instances for the UI to render (default view)
@@ -256,12 +270,12 @@ export const apiSettings = {
                 this._saveUserInstances();
 
                 const stored = localStorage.getItem(this.STORAGE_KEY);
-                let fullObj = stored ? JSON.parse(stored) : { api: [], streaming: [] };
+                let fullObj = stored ? JSON.parse(stored) : { api: [], streaming: [], qobuz: [], youtube: [] };
 
                 if (fullObj && fullObj.data) {
                     fullObj.data[type] = defaultInst;
                 } else {
-                    if (!fullObj) fullObj = { api: [], streaming: [] };
+                    if (!fullObj) fullObj = { api: [], streaming: [], qobuz: [], youtube: [] };
                     fullObj[type] = defaultInst;
                 }
 
@@ -3164,6 +3178,24 @@ export const modalSettings = {
                 modal.classList.remove('active');
             }
         });
+    },
+};
+
+export const apiCacheSettings = {
+    STORAGE_KEY: 'api-cache-max-size',
+
+    getMaxSize() {
+        try {
+            const val = parseInt(localStorage.getItem(this.STORAGE_KEY));
+            return isNaN(val) ? 1000 : val;
+        } catch {
+            return 1000;
+        }
+    },
+
+    setMaxSize(size) {
+        localStorage.setItem(this.STORAGE_KEY, size.toString());
+        window.dispatchEvent(new CustomEvent('api-cache-size-changed', { detail: { size } }));
     },
 };
 

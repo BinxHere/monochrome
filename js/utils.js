@@ -12,6 +12,7 @@ export const REPEAT_MODE = {
 };
 
 export const AUDIO_QUALITIES = {
+    YOUTUBE: 'YOUTUBE',
     DOLBY_ATMOS: 'DOLBY_ATMOS',
     HI_RES_LOSSLESS: 'HI_RES_LOSSLESS',
     LOSSLESS: 'LOSSLESS',
@@ -19,9 +20,10 @@ export const AUDIO_QUALITIES = {
     LOW: 'LOW',
 };
 
-export const QUALITY_PRIORITY = ['DOLBY_ATMOS', 'HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW'];
+export const QUALITY_PRIORITY = ['DOLBY_ATMOS', 'HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW', 'YOUTUBE'];
 
 export const QUALITY_TOKENS = {
+    YOUTUBE: ['YOUTUBE', 'YT'],
     DOLBY_ATMOS: ['DOLBY_ATMOS', 'ATMOS'],
     HI_RES_LOSSLESS: [
         'HI_RES_LOSSLESS',
@@ -296,6 +298,8 @@ export const createQualityBadgeHTML = (track) => {
         return `<span class="quality-badge quality-atmos" title="Dolby Atmos">${SVG_ATMOS(20)}</span>`;
     } else if (quality === 'HI_RES_LOSSLESS') {
         return '<span class="quality-badge quality-hires" title="Hi-Res Lossless">HD</span>';
+    } else if (quality === 'YOUTUBE') {
+        return '<span class="quality-badge quality-youtube" title="YouTube">YT</span>';
     }
     return '';
 };

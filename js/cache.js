@@ -2,8 +2,8 @@
 export class APICache {
     constructor(options = {}) {
         this.memoryCache = new Map();
-        this.maxSize = options.maxSize || 200;
-        this.ttl = options.ttl || 1000 * 60 * 30;
+        this.maxSize = options.maxSize || 500;
+        this.ttl = options.ttl || 1000 * 60 * 60 * 24; // Default 24 hours
         this.dbName = 'monochrome-cache';
         this.dbVersion = 1;
         this.db = null;
@@ -43,7 +43,8 @@ export class APICache {
 
         if (this.memoryCache.has(key)) {
             const cached = this.memoryCache.get(key);
-            if (Date.now() - cached.timestamp < this.ttl) {
+            const effectiveTTL = cached.ttl || this.ttl;
+            if (Date.now() - cached.timestamp < effectiveTTL) {
                 return cached.data;
             }
             this.memoryCache.delete(key);
@@ -52,9 +53,12 @@ export class APICache {
         if (this.db) {
             try {
                 const cached = await this.getFromIndexedDB(key);
-                if (cached && Date.now() - cached.timestamp < this.ttl) {
-                    this.memoryCache.set(key, cached);
-                    return cached.data;
+                if (cached) {
+                    const effectiveTTL = cached.ttl || this.ttl;
+                    if (Date.now() - cached.timestamp < effectiveTTL) {
+                        this.memoryCache.set(key, cached);
+                        return cached.data;
+                    }
                 }
             } catch (error) {
                 console.log('IndexedDB read error:', error);
@@ -64,12 +68,13 @@ export class APICache {
         return null;
     }
 
-    async set(type, params, data) {
+    async set(type, params, data, customTTL) {
         const key = this.generateKey(type, params);
         const entry = {
             key,
             data,
             timestamp: Date.now(),
+            ttl: customTTL,
         };
 
         this.memoryCache.set(key, entry);
@@ -140,7 +145,8 @@ export class APICache {
         const expired = [];
 
         for (const [key, entry] of this.memoryCache.entries()) {
-            if (now - entry.timestamp >= this.ttl) {
+            const effectiveTTL = entry.ttl || this.ttl;
+            if (now - entry.timestamp >= effectiveTTL) {
                 expired.push(key);
             }
         }
@@ -151,14 +157,25 @@ export class APICache {
             try {
                 const transaction = this.db.transaction(['responses'], 'readwrite');
                 const store = transaction.objectStore('responses');
+                
+                // For IndexedDB, we can't easily query by dynamic TTL per row in a single range request
+                // unless we store the expiration timestamp.
+                // For now, let's just clear those that are definitely older than the default TTL,
+                // and maybe do a full scan or just rely on 'get' to filter them out.
+                // A better way would be to store 'expiresAt' field.
+                
                 const index = store.index('timestamp');
-                const range = IDBKeyRange.upperBound(now - this.ttl);
+                const range = IDBKeyRange.upperBound(now); // Get all
                 const request = index.openCursor(range);
 
                 request.onsuccess = (event) => {
                     const cursor = event.target.result;
                     if (cursor) {
-                        cursor.delete();
+                        const entry = cursor.value;
+                        const effectiveTTL = entry.ttl || this.ttl;
+                        if (now - entry.timestamp >= effectiveTTL) {
+                            cursor.delete();
+                        }
                         cursor.continue();
                     }
                 };

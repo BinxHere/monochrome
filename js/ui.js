@@ -6049,16 +6049,19 @@ export class UIRenderer {
             this.api.settings.getInstances('api'),
             this.api.settings.getInstances('streaming'),
             this.api.settings.getInstances('qobuz'),
+            this.api.settings.getInstances('youtube'),
         ])
             .then((results) => {
                 const apiInstances = results[0].status === 'fulfilled' ? results[0].value : [];
                 const streamingInstances = results[1].status === 'fulfilled' ? results[1].value : [];
                 const qobuzInstances = results[2].status === 'fulfilled' ? results[2].value : [];
+                const youtubeInstances = results[3].status === 'fulfilled' ? results[3].value : [];
                 const renderGroup = (instances, type) => {
                     const groupLabels = {
                         api: 'API Instances',
                         streaming: 'Streaming Instances',
                         qobuz: 'Qobuz Instances',
+                        youtube: 'YouTube Instances',
                     };
 
                     const listHtml = (instances || [])
@@ -6112,7 +6115,8 @@ export class UIRenderer {
                     (streamingInstances && streamingInstances.length > 0
                         ? renderGroup(streamingInstances, 'streaming')
                         : '') +
-                    renderGroup(qobuzInstances, 'qobuz');
+                    renderGroup(qobuzInstances, 'qobuz') +
+                    renderGroup(youtubeInstances, 'youtube');
 
                 const stats = this.api.getCacheStats();
                 const cacheInfo = document.getElementById('cache-info');
