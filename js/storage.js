@@ -77,31 +77,15 @@ export const apiSettings = {
                 console.error('Failed to load instances from all uptime APIs:', fetchError);
                 this.defaultInstances = {
                     api: [
-                        { url: 'https://hifi.geeked.wtf', version: '2.7' },
-                        { url: 'https://eu-central.monochrome.tf', version: '2.7' },
-                        { url: 'https://us-west.monochrome.tf', version: '2.7' },
-                        { url: 'https://api.monochrome.tf', version: '2.5' },
-                        { url: 'https://monochrome-api.samidy.com', version: '2.3' },
-                        { url: 'https://maus.qqdl.site', version: '2.6' },
-                        { url: 'https://vogel.qqdl.site', version: '2.6' },
-                        { url: 'https://katze.qqdl.site', version: '2.6' },
-                        { url: 'https://hund.qqdl.site', version: '2.6' },
-                        { url: 'https://tidal.kinoplus.online', version: '2.2' },
-                        { url: 'https://wolf.qqdl.site', version: '2.2' },
+                        { url: 'https://hifi-api.binxhere.net', version: '2.10' },
                     ],
                     streaming: [
-                        { url: 'https://hifi.geeked.wtf', version: '2.7' },
-                        { url: 'https://maus.qqdl.site', version: '2.6' },
-                        { url: 'https://vogel.qqdl.site', version: '2.6' },
-                        { url: 'https://katze.qqdl.site', version: '2.6' },
-                        { url: 'https://hund.qqdl.site', version: '2.6' },
-                        { url: 'https://wolf.qqdl.site', version: '2.6' },
                     ],
                     qobuz: [
-                        { url: 'https://qdl-api.monochrome.tf', version: '1.0' },
+                        { url: 'https://qobuz-dl.binxhere.net', version: '1.0' },
                         { url: 'https://qobuz.kennyy.com.br', version: '1.0' },
                     ],
-                    youtube: [{ url: 'http://localhost:3006', version: '1.0' }],
+                    youtube: [{ url: 'https://yt-api.binxhere.net', version: '1.0' }],
                 };
                 this.instancesLoaded = true;
                 this._loadPromise = null;
