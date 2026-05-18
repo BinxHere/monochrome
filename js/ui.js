@@ -6061,7 +6061,7 @@ export class UIRenderer {
                         api: 'API Instances',
                         streaming: 'Streaming Instances',
                         qobuz: 'Qobuz Instances',
-                        youtube: 'YouTube Instances',
+                        youtube: 'YouTube Resolver',
                     };
 
                     const listHtml = (instances || [])
@@ -6277,7 +6277,6 @@ export class UIRenderer {
 
             playBtn.onclick = () => {
                 this.player.setQueue([track], 0);
-                this.player.enableAutoplay();
                 this.player.playTrackFromQueue();
             };
 

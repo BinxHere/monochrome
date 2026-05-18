@@ -16,7 +16,14 @@ export const apiSettings = {
             const stored = localStorage.getItem('monochrome-user-api-instances-v1');
             const parsed = stored ? JSON.parse(stored) : { api: [], streaming: [], qobuz: [], youtube: [] };
             if (!parsed.qobuz) parsed.qobuz = [];
-            if (!parsed.youtube) parsed.youtube = [];
+            if (!parsed.youtube) {
+                parsed.youtube = [];
+                // Migrate existing youtube-api-url
+                const oldUrl = localStorage.getItem('youtube-api-url');
+                if (oldUrl && oldUrl !== 'http://localhost:3006') {
+                    parsed.youtube.push({ url: oldUrl, isUser: true, version: 'custom' });
+                }
+            }
             this.userInstances = parsed;
         } catch {
             this.userInstances = { api: [], streaming: [], qobuz: [], youtube: [] };
@@ -82,7 +89,7 @@ export const apiSettings = {
                     streaming: [
                     ],
                     qobuz: [
-                        { url: 'https://qobuz-dl.binxhere.net', version: '1.0' },
+			{ url: 'https://qobuz-dl.binxhere.net', version: '1.0' },
                         { url: 'https://qobuz.kennyy.com.br', version: '1.0' },
                     ],
                     youtube: [{ url: 'https://yt-api.binxhere.net', version: '1.0' }],
@@ -113,15 +120,16 @@ export const apiSettings = {
                 groupedInstances.qobuz = data.qobuz;
             }
 
+            if (data.youtube && Array.isArray(data.youtube)) {
+                groupedInstances.youtube = data.youtube;
+            }
+
             // Ensure default Qobuz instance is always available
             if (groupedInstances.qobuz.length === 0) {
                 groupedInstances.qobuz = [{ url: 'https://qdl-api.monochrome.tf', version: '1.0' }];
             }
 
-            if (data.youtube && Array.isArray(data.youtube)) {
-                groupedInstances.youtube = data.youtube;
-            }
-
+            // Ensure default YouTube instance is always available
             if (groupedInstances.youtube.length === 0) {
                 groupedInstances.youtube = [{ url: 'http://localhost:3006', version: '1.0' }];
             }
@@ -254,12 +262,12 @@ export const apiSettings = {
                 this._saveUserInstances();
 
                 const stored = localStorage.getItem(this.STORAGE_KEY);
-                let fullObj = stored ? JSON.parse(stored) : { api: [], streaming: [], qobuz: [], youtube: [] };
+                let fullObj = stored ? JSON.parse(stored) : { api: [], streaming: [] };
 
                 if (fullObj && fullObj.data) {
                     fullObj.data[type] = defaultInst;
                 } else {
-                    if (!fullObj) fullObj = { api: [], streaming: [], qobuz: [], youtube: [] };
+                    if (!fullObj) fullObj = { api: [], streaming: [] };
                     fullObj[type] = defaultInst;
                 }
 
@@ -2399,16 +2407,25 @@ export const radioSettings = {
     },
 };
 
+// fuck you binimum for adding this bullshit
+
+try {
+    const RESET_FLAG = 'autoplay-enabled-reset-v1';
+    if (!localStorage.getItem(RESET_FLAG)) {
+        localStorage.removeItem('autoplay-enabled');
+        localStorage.setItem(RESET_FLAG, '1');
+    }
+} catch {}
+
 export const autoplaySettings = {
     ENABLED_KEY: 'autoplay-enabled',
     SMART_RECS_KEY: 'smart-recommendations-enabled',
 
     isEnabled() {
         try {
-            const val = localStorage.getItem(this.ENABLED_KEY);
-            return val === null ? true : val === 'true';
+            return localStorage.getItem(this.ENABLED_KEY) === 'true';
         } catch {
-            return true;
+            return false;
         }
     },
 
@@ -3162,24 +3179,6 @@ export const modalSettings = {
                 modal.classList.remove('active');
             }
         });
-    },
-};
-
-export const apiCacheSettings = {
-    STORAGE_KEY: 'api-cache-max-size',
-
-    getMaxSize() {
-        try {
-            const val = parseInt(localStorage.getItem(this.STORAGE_KEY));
-            return isNaN(val) ? 1000 : val;
-        } catch {
-            return 1000;
-        }
-    },
-
-    setMaxSize(size) {
-        localStorage.setItem(this.STORAGE_KEY, size.toString());
-        window.dispatchEvent(new CustomEvent('api-cache-size-changed', { detail: { size } }));
     },
 };
 

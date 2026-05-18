@@ -1333,6 +1333,21 @@ export class Player {
                 if (this.playbackSequence !== currentSequence) return;
 
                 streamUrl = resolvedStreamInfo.url;
+                if (resolvedStreamInfo.actualQuality) {
+                    track.actualQuality = resolvedStreamInfo.actualQuality;
+                    const titleEl = document.querySelector('.now-playing-bar .title');
+                    if (titleEl) {
+                        const trackTitle = getTrackTitle(track);
+                        titleEl.innerHTML = `${escapeHtml(trackTitle)} ${createQualityBadgeHTML(track)}`;
+                    }
+
+                    if (
+                        UIRenderer.instance &&
+                        document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex'
+                    ) {
+                        UIRenderer.instance.updateFullscreenMetadata(track, this.getNextTrack());
+                    }
+                }
 
                 if (resolvedStreamInfo.source === 'YOUTUBE') {
                     track.audioQuality = 'YOUTUBE';

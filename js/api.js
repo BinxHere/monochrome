@@ -10,7 +10,7 @@ import {
     getTrackCoverId,
     getCoverBlob,
 } from './utils.js';
-import { preferDolbyAtmosSettings, trackDateSettings, devModeSettings, apiCacheSettings } from './storage.js';
+import { preferDolbyAtmosSettings, trackDateSettings, devModeSettings } from './storage.js';
 import { APICache } from './cache.js';
 import { DashDownloader } from './dash-downloader.ts';
 import { HlsDownloader } from './hls-downloader.js';
@@ -37,12 +37,20 @@ import {
 
 export const DASH_MANIFEST_UNAVAILABLE_CODE = 'DASH_MANIFEST_UNAVAILABLE';
 export { resolveDownloadTotalBytes };
+let lastAudioSourceMissingNotifyAt = 0;
+function notifyAudioSourceMissing() {
+    const now = Date.now();
+    if (now - lastAudioSourceMissingNotifyAt < 3000) return;
+    lastAudioSourceMissingNotifyAt = now;
+    import('./downloads.js').then((m) => m.showNotification('Could not find Audio Source')).catch(() => {});
+}
 
 export class LosslessAPI {
     constructor(settings) {
         this.settings = settings;
         this.cache = new APICache({
-            maxSize: apiCacheSettings.getMaxSize(),
+            maxSize: 200,
+            ttl: 1000 * 60 * 30,
         });
         this.streamCache = new Map();
 
@@ -53,18 +61,12 @@ export class LosslessAPI {
             },
             1000 * 60 * 5
         );
-
-        window.addEventListener('api-cache-size-changed', (e) => {
-            if (this.cache) {
-                this.cache.maxSize = e.detail.size;
-            }
-        });
     }
 
     pruneStreamCache() {
-        if (this.streamCache.size > 200) {
+        if (this.streamCache.size > 50) {
             const entries = Array.from(this.streamCache.entries());
-            const toDelete = entries.slice(0, entries.length - 200);
+            const toDelete = entries.slice(0, entries.length - 50);
             toDelete.forEach(([key]) => this.streamCache.delete(key));
         }
     }
@@ -1704,6 +1706,30 @@ export class LosslessAPI {
         }
     }
 
+    async getTrackFromDevMode(id, quality = 'LOSSLESS') {
+        const devBaseUrl = devModeSettings.getUrl().replace(/\/+$/, '');
+        const requestedQuality = normalizeQualityToken(quality) || quality || 'LOSSLESS';
+        const params = new URLSearchParams({
+            id: String(id),
+            quality: requestedQuality,
+            adaptive: 'false',
+        });
+        for (const format of this.getTrackManifestFormats(quality)) {
+            params.append('formats', format);
+        }
+
+        const url = `${devBaseUrl}/trackManifests/?${params.toString()}`;
+        if (import.meta.env.DEV) {
+            console.log('[dev-mode]', url);
+        }
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Dev mode request failed: ${response.status} ${response.statusText}`);
+        }
+        const jsonResponse = await response.json();
+        return this.parseTrackLookup(await this.normalizeTrackManifestResponse(jsonResponse, quality));
+    }
+
     async getTrack(id, quality = 'LOSSLESS', { adaptive = false } = {}) {
         const cacheKey = `${id}_${quality}_${adaptive ? 'adaptive' : 'fixed'}`;
         const cached = await this.cache.get('track', cacheKey);
@@ -1802,43 +1828,34 @@ export class LosslessAPI {
         return null;
     }
 
-    async getYouTubeStreamUrl(query) {
-        let youtubeInstances = [];
+    async getYoutubeStreamUrl(title, artist) {
         try {
-            youtubeInstances = await this.settings.getInstances('youtube');
-        } catch {
-            // ignore
+            const query = `${artist} - ${title}`;
+            const instances = await this.settings.getInstances('youtube');
+            const youtubeInstance = instances.length > 0 ? instances[0] : { url: 'http://localhost:3006' };
+            const rawUrl = typeof youtubeInstance === 'string' ? youtubeInstance : youtubeInstance.url;
+            const baseUrl = (rawUrl || 'http://localhost:3006').replace(/\/+$/, '');
+            const response = await fetch(`${baseUrl}/youtube/resolve?q=${encodeURIComponent(query)}`);
+            if (!response.ok) throw new Error('YouTube resolution failed');
+            const data = await response.json();
+            if (!data.url) throw new Error('No YouTube URL found');
+
+            // Use the proxy to avoid CORS and potential IP restrictions
+            const proxyUrl = `${baseUrl}/youtube/proxy?url=${encodeURIComponent(data.url)}`;
+            return {
+                url: proxyUrl,
+                actualQuality: 'YT',
+                rgInfo: {
+                    trackReplayGain: 0,
+                    trackPeakAmplitude: 1,
+                    albumReplayGain: 0,
+                    albumPeakAmplitude: 1,
+                },
+            };
+        } catch (error) {
+            console.error('YouTube fallback failed:', error);
+            throw error;
         }
-
-        if (!youtubeInstances || youtubeInstances.length === 0) {
-            return null;
-        }
-
-        for (const instance of youtubeInstances) {
-            const rawUrl = typeof instance === 'string' ? instance : instance?.url;
-            if (!rawUrl || typeof rawUrl !== 'string') continue;
-            const baseUrl = rawUrl.replace(/\/+$/, '');
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-                const resolveRes = await fetch(`${baseUrl}/youtube/resolve?q=${encodeURIComponent(query)}`, {
-                    signal: controller.signal,
-                });
-                clearTimeout(timeoutId);
-                if (!resolveRes.ok) continue;
-                const resolveJson = await resolveRes.json();
-
-                if (resolveJson.url) {
-                    // Use proxy if available on the same instance
-                    return `${baseUrl}/youtube/proxy?url=${encodeURIComponent(resolveJson.url)}`;
-                }
-            } catch (e) {
-                console.warn(`YouTube instance ${baseUrl} failed for query ${query}:`, e);
-                continue;
-            }
-        }
-        return null;
     }
 
     async getStreamUrl(id, quality = 'LOSSLESS') {
@@ -1848,85 +1865,63 @@ export class LosslessAPI {
             return this.streamCache.get(cacheKey);
         }
 
-        const cached = await this.cache.get('stream_info', { id, quality });
-        if (cached) {
-            this.streamCache.set(cacheKey, cached);
-            return cached;
+        if (devModeSettings.isEnabled()) {
+            const lookup = await this.getTrackFromDevMode(id, quality);
+            let streamUrl;
+            if (lookup.originalTrackUrl) {
+                streamUrl = lookup.originalTrackUrl;
+            } else if (lookup.info?.manifest) {
+                streamUrl = this.extractStreamUrlFromManifest(lookup.info.manifest);
+            }
+            if (!streamUrl) {
+                throw new Error('Could not resolve stream URL from dev mode');
+            }
+            const result = {
+                url: streamUrl,
+                rgInfo: lookup.info
+                    ? {
+                          trackReplayGain: lookup.info.trackReplayGain || lookup.info.replayGain,
+                          trackPeakAmplitude: lookup.info.trackPeakAmplitude || lookup.info.peakAmplitude,
+                          albumReplayGain: lookup.info.albumReplayGain,
+                          albumPeakAmplitude: lookup.info.albumPeakAmplitude,
+                      }
+                    : null,
+            };
+            this.streamCache.set(cacheKey, result);
+            return result;
         }
 
-        let lastAudioSourceMissingNotifyAt = 0;
-        function notifyAudioSourceMissing() {
-            const now = Date.now();
-            if (now - lastAudioSourceMissingNotifyAt < 3000) return;
-            lastAudioSourceMissingNotifyAt = now;
-            import('./downloads.js').then((m) => m.showNotification('Could not find Audio Source')).catch(() => {});
-        }
         const track = await this.getTrackMetadata(id);
-        if (!track?.isrc) {
-            notifyAudioSourceMissing();
-            throw new Error('Could not resolve stream URL: track has no ISRC for Qobuz lookup');
-        }
+        let streamUrlResult = null;
 
-        let streamUrl = null;
-        let rgInfo = {
-            trackReplayGain: 0,
-            trackPeakAmplitude: 1,
-            albumReplayGain: 0,
-            albumPeakAmplitude: 1,
-        };
-        let source = 'TIDAL';
-
-        // 1. Try Tidal
-        try {
-            const tidalTrack = await this.getTrack(id, quality);
-            if (tidalTrack.info?.manifest) {
-                const url = this.extractStreamUrlFromManifest(tidalTrack.info.manifest);
-                if (url) {
-                    streamUrl = url;
-                    rgInfo = {
-                        trackReplayGain: tidalTrack.info.trackReplayGain ?? 0,
-                        trackPeakAmplitude: tidalTrack.info.trackPeakAmplitude ?? 1,
-                        albumReplayGain: tidalTrack.info.albumReplayGain ?? 0,
-                        albumPeakAmplitude: tidalTrack.info.albumPeakAmplitude ?? 1,
-                    };
-                }
-            }
-        } catch (e) {
-            console.warn(`Tidal failed for ${id}, trying Qobuz...`, e);
-        }
-
-        // 2. Try Qobuz if Tidal failed
-        if (!streamUrl) {
-            const qobuzResult = await this.getQobuzStreamUrl(track.isrc, quality);
-            if (qobuzResult?.url) {
-                streamUrl = qobuzResult.url;
-                if (qobuzResult.rgInfo) rgInfo = qobuzResult.rgInfo;
-                source = 'QOBUZ';
+        if (track?.isrc) {
+            try {
+                streamUrlResult = await this.getQobuzStreamUrl(track.isrc, quality);
+            } catch (e) {
+                console.warn('Qobuz lookup failed, trying YouTube fallback...', e);
             }
         }
 
-        // 3. Try YouTube if Qobuz also failed
-        if (!streamUrl) {
-            console.log(`Tidal and Qobuz failed for ${track.isrc}, trying YouTube fallback...`);
-            const searchQuery = `${track.artist?.name || track.artists?.[0]?.name} - ${track.title}`;
-            streamUrl = await this.getYouTubeStreamUrl(searchQuery);
-            if (streamUrl) source = 'YOUTUBE';
-        }
-
-        if (!streamUrl) {
-            notifyAudioSourceMissing();
-            throw new Error('Could not resolve stream URL from Qobuz or YouTube');
+        if (!streamUrlResult?.url) {
+            try {
+                streamUrlResult = await this.getYoutubeStreamUrl(track.title, track.artist?.name || track.artist);
+            } catch (e) {
+                notifyAudioSourceMissing();
+                throw new Error('Could not resolve stream URL from Qobuz or YouTube');
+            }
         }
 
         const result = {
-            url: streamUrl,
-            rgInfo,
-            source,
+            url: streamUrlResult.url,
+            actualQuality: streamUrlResult.actualQuality || quality,
+            rgInfo: streamUrlResult.rgInfo || {
+                trackReplayGain: 0,
+                trackPeakAmplitude: 1,
+                albumReplayGain: 0,
+                albumPeakAmplitude: 1,
+            },
         };
-        
         this.streamCache.set(cacheKey, result);
-        await this.cache.set('stream_info', { id, quality }, result, 1000 * 60 * 60 * 72); // 72 hours
-        
         return result;
     }
 
@@ -1935,12 +1930,6 @@ export class LosslessAPI {
 
         if (this.streamCache.has(cacheKey)) {
             return this.streamCache.get(cacheKey);
-        }
-
-        const cached = await this.cache.get('video_stream', id);
-        if (cached) {
-            this.streamCache.set(cacheKey, cached);
-            return cached;
         }
 
         const lookup = await this.getVideo(id);
@@ -1977,9 +1966,9 @@ export class LosslessAPI {
             throw new Error(`Could not resolve video stream URL for ID: ${id}`);
         }
 
-        this.streamCache.set(cacheKey, streamUrl);
-        await this.cache.set('video_stream', id, streamUrl, 1000 * 60 * 60 * 72); // 72 hours
-        
+        if (!(lookup instanceof TidalResponse)) {
+            this.streamCache.set(cacheKey, streamUrl);
+        }
         return streamUrl;
     }
 
@@ -1999,70 +1988,49 @@ export class LosslessAPI {
 
         if (isVideo) {
             lookup = await this.getVideo(id);
+        } else if (devModeSettings.isEnabled()) {
+            lookup = new PlaybackInfo(await this.getTrackFromDevMode(id, cleanQuality));
         } else {
-            // Try Tidal first
-            try {
-                const tidalTrack = await this.getTrack(id, cleanQuality);
-                if (tidalTrack.info?.manifest) {
-                    const url = this.extractStreamUrlFromManifest(tidalTrack.info.manifest);
-                    if (url) {
-                        qobuzStreamUrl = url;
-                        lookup = {
-                            info: {
-                                audioQuality: cleanQuality,
-                                trackReplayGain: tidalTrack.info.trackReplayGain ?? 0,
-                                trackPeakAmplitude: tidalTrack.info.trackPeakAmplitude ?? 1,
-                                albumReplayGain: tidalTrack.info.albumReplayGain ?? 0,
-                                albumPeakAmplitude: tidalTrack.info.albumPeakAmplitude ?? 1,
-                            },
-                        };
+            if (track?.isrc) {
+                try {
+                    const qobuzResult = await this.getQobuzStreamUrl(track.isrc, cleanQuality);
+                    if (qobuzResult?.url) {
+                        qobuzStreamUrl = qobuzResult.url;
+                        qobuzRgInfo = qobuzResult.rgInfo;
                     }
+                } catch (e) {
+                    console.warn('Qobuz enrich failed, trying YouTube fallback...', e);
                 }
-            } catch (e) {
-                console.warn(`Tidal failed for enrichment of ${id}, trying Qobuz...`, e);
             }
 
             if (!qobuzStreamUrl) {
-                if (!track?.isrc) {
-                    notifyAudioSourceMissing();
-                    throw new Error('Cannot resolve audio stream: track has no ISRC for Qobuz/YouTube lookup');
-                }
-
-                const qobuzResult = await this.getQobuzStreamUrl(track.isrc, cleanQuality);
-                if (qobuzResult?.url) {
-                    qobuzStreamUrl = qobuzResult.url;
-                    qobuzRgInfo = qobuzResult.rgInfo;
+                try {
+                    const ytResult = await this.getYoutubeStreamUrl(track.title, track.artist?.name || track.artist);
+                    qobuzStreamUrl = ytResult.url;
+                    qobuzRgInfo = ytResult.rgInfo;
                     lookup = {
                         info: {
-                            audioQuality: cleanQuality,
-                            trackReplayGain: qobuzRgInfo?.trackReplayGain ?? 0,
-                            trackPeakAmplitude: qobuzRgInfo?.trackPeakAmplitude ?? 1,
-                            albumReplayGain: qobuzRgInfo?.albumReplayGain ?? 0,
-                            albumPeakAmplitude: qobuzRgInfo?.albumPeakAmplitude ?? 1,
+                            audioQuality: 'HIGH',
+                            trackReplayGain: 0,
+                            trackPeakAmplitude: 1,
+                            albumReplayGain: 0,
+                            albumPeakAmplitude: 1,
                         },
                     };
-                } else {
-                    console.log(`Tidal and Qobuz failed for enrichment of ${track.isrc}, trying YouTube fallback...`);
-                    const searchQuery = `${track.artist?.name || track.artists?.[0]?.name} - ${track.title}`;
-                    qobuzStreamUrl = await this.getYouTubeStreamUrl(searchQuery);
-
-                    if (qobuzStreamUrl) {
-                        lookup = {
-                            info: {
-                                audioQuality: cleanQuality,
-                                trackReplayGain: 0,
-                                trackPeakAmplitude: 1,
-                                albumReplayGain: 0,
-                                albumPeakAmplitude: 1,
-                            },
-                        };
-                    }
+                } catch (e) {
+                    notifyAudioSourceMissing();
+                    throw new Error('Could not resolve audio stream from Qobuz or YouTube');
                 }
-            }
-
-            if (!qobuzStreamUrl) {
-                notifyAudioSourceMissing();
-                throw new Error('Could not resolve audio stream from Tidal, Qobuz or YouTube');
+            } else {
+                lookup = {
+                    info: {
+                        audioQuality: cleanQuality,
+                        trackReplayGain: qobuzRgInfo?.trackReplayGain ?? 0,
+                        trackPeakAmplitude: qobuzRgInfo?.trackPeakAmplitude ?? 1,
+                        albumReplayGain: qobuzRgInfo?.albumReplayGain ?? 0,
+                        albumPeakAmplitude: qobuzRgInfo?.albumPeakAmplitude ?? 1,
+                    },
+                };
             }
         }
 
