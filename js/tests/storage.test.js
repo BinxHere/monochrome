@@ -7,6 +7,7 @@ import {
     gaplessPlaybackSettings,
     exponentialVolumeSettings,
     audioEffectsSettings,
+    apiCacheSettings,
 } from '../storage.js';
 
 describe('storage.js', () => {
@@ -120,6 +121,22 @@ describe('storage.js', () => {
             audioEffectsSettings.setSpeed(2.0);
             audioEffectsSettings.resetSpeed();
             expect(audioEffectsSettings.getSpeed()).toBe(1.0);
+        });
+    });
+
+    describe('apiCacheSettings', () => {
+        test('defaults to 200', () => {
+            expect(apiCacheSettings.getMaxSize()).toBe(200);
+        });
+
+        test('gets and sets max size', () => {
+            apiCacheSettings.setMaxSize(500);
+            expect(apiCacheSettings.getMaxSize()).toBe(500);
+        });
+
+        test('handles invalid values', () => {
+            localStorage.setItem(apiCacheSettings.STORAGE_KEY, 'invalid');
+            expect(apiCacheSettings.getMaxSize()).toBe(200);
         });
     });
 });

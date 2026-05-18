@@ -10,7 +10,7 @@ import {
     getTrackCoverId,
     getCoverBlob,
 } from './utils.js';
-import { preferDolbyAtmosSettings, trackDateSettings, devModeSettings } from './storage.js';
+import { preferDolbyAtmosSettings, trackDateSettings, devModeSettings, apiCacheSettings } from './storage.js';
 import { APICache } from './cache.js';
 import { DashDownloader } from './dash-downloader.ts';
 import { HlsDownloader } from './hls-downloader.js';
@@ -49,7 +49,7 @@ export class LosslessAPI {
     constructor(settings) {
         this.settings = settings;
         this.cache = new APICache({
-            maxSize: 200,
+            maxSize: apiCacheSettings.getMaxSize(),
             ttl: 1000 * 60 * 30,
         });
         this.streamCache = new Map();

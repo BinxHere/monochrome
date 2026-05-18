@@ -3182,6 +3182,23 @@ export const modalSettings = {
     },
 };
 
+export const apiCacheSettings = {
+    STORAGE_KEY: 'api-cache-max-size',
+
+    getMaxSize() {
+        try {
+            const val = parseInt(localStorage.getItem(this.STORAGE_KEY));
+            return isNaN(val) ? 200 : val;
+        } catch {
+            return 200;
+        }
+    },
+
+    setMaxSize(size) {
+        localStorage.setItem(this.STORAGE_KEY, size.toString());
+    },
+};
+
 export const devModeSettings = {
     STORAGE_KEY: 'dev-mode-enabled',
     URL_KEY: 'dev-mode-url',
