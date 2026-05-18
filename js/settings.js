@@ -41,7 +41,6 @@ import {
     fullscreenCoverVanillaTiltSettings,
     fullscreenCoverTiltDistanceSettings,
     fullscreenCoverTiltSpeedSettings,
-    apiCacheSettings,
     devModeSettings,
     serverDisruptionSettings,
 } from './storage.js';
